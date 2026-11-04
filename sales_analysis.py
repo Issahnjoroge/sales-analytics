@@ -1,7 +1,3 @@
-"""
-Tech Hub Kenya — September 2026 sales analytics.
-Tasks 1-7 use only Python's standard library. Pandas is imported only for verification.
-"""
 import csv
 import math
 from pathlib import Path
@@ -12,14 +8,21 @@ HIGH_VALUE_THRESHOLD = 50_000.0
 
 
 def read_sales(path=DATA_PATH):
-    """Read raw sales using csv.DictReader and report row count and columns."""
-    with open(path, "r", newline="", encoding="utf-8-sig") as file:
-        reader = csv.DictReader(file)
-        rows = list(reader)
-        columns = reader.fieldnames or []
-    print(f"Rows read: {len(rows)}")
-    print(f"Columns found: {', '.join(columns)}")
-    return rows
+    try:
+        with open(path, "r", newline="", encoding="utf-8-sig") as file:
+            reader = csv.DictReader(file)
+            rows = list(reader)
+            columns = reader.fieldnames or []
+
+        print(f"Rows read: {len(rows)}")
+        print(f"Columns found: {', '.join(columns)}")
+
+        return rows
+
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Sales. CSV file was not found: {path}")
+
+    except PermissionError
 
 
 def parse_number(value):
@@ -46,25 +49,40 @@ def parse_number(value):
 
 
 def convert_rows(rows):
-    """Return (clean_rows, skipped_rows), with an explicit reason per rejected row."""
-    clean_rows, skipped_rows = [], []
+    clean_rows = []
+    skipped_rows = []
+
     for raw in rows:
         row = dict(raw)
         reasons = []
-        quantity = parse_number(raw.get("quantity"))
-        price = parse_number(raw.get("unit_price_kes"))
+
+        raw_quantity = raw.get("quantity")
+        raw_price = raw.get("unit_price_kes")
+
+        quantity = parse_number(raw_quantity)
+        price = parse_number(raw_price)
 
         if quantity is None:
-            reasons.append("quantity is blank or not numeric")
+            if raw_quantity is None or str(raw_quantity).strip() == "":
+                reasons.append(f"quantity is blank (raw value: {raw_quantity!r})")
+            else:
+                reasons.append(f"quantity is not numeric(raw value: {raw_quantity!r})")
+        
         elif quantity <= 0:
-            reasons.append("quantity must be positive")
+            reasons.append(f"quantity must be positive (raw_value: {raw_quantity!r})")
+
         elif not quantity.is_integer():
-            reasons.append("quantity must be a whole number")
+            reasons.append(f"quantity must be a whole number (raw value: {raw_quantity!r}")
 
         if price is None:
-            reasons.append("unit price is blank or not numeric")
+             if raw_price is None or str(raw_price).strip() == "":
+                reasons.append(f"unit price is blank (raw value: {raw_price!r})")
+             else:
+                reasons.append(f"unit price is not numeric (raw value: {raw_price!r})")
+
+            
         elif price <= 0:
-            reasons.append("unit price must be positive")
+            reasons.append(f"unit price must be positive (raw value: {raw_price!r}")
 
         if reasons:
             skipped_rows.append({
@@ -76,7 +94,9 @@ def convert_rows(rows):
         row["quantity"] = int(quantity)
         row["unit_price_kes"] = price
         row["revenue"] = row["quantity"] * row["unit_price_kes"]
+
         clean_rows.append(row)
+
     return clean_rows, skipped_rows
 
 
@@ -138,50 +158,74 @@ def minimum_maximum(values):
 
 
 def verify_with_pandas(path, my_results):
-    """Independently clean the source with pandas and compare headline results."""
+    messages = []
+
     try:
         import pandas as pd
     except ImportError:
-        print("Pandas verification: SKIPPED (install pandas on your laptop)")
-        return
+        messages.append(
+            "Pandas verification: SKIPPED" "(install pandas on your laptop)")
+        return messages
 
     frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    
     frame["quantity_num"] = frame["quantity"].map(parse_number)
     frame["price_num"] = frame["unit_price_kes"].map(parse_number)
+    
     valid_quantity = (
         frame["quantity_num"].notna()
         & (frame["quantity_num"] > 0)
         & (frame["quantity_num"] % 1 == 0)
     )
+    
     valid_price = frame["price_num"].notna() & (frame["price_num"] > 0)
+    
     cleaned = frame[valid_quantity & valid_price].copy()
+    
     cleaned["revenue"] = cleaned["quantity_num"] * cleaned["price_num"]
+    
     pandas_total = float(cleaned["revenue"].sum())
+    
     pandas_products = cleaned.groupby("product")["revenue"].sum().to_dict()
+    
     pandas_top = sorted(pandas_products.items(), key=lambda item: (-item[1], item[0]))[:3]
+    
     pandas_mean = float(cleaned["revenue"].mean())
+    
     pandas_median = float(cleaned["revenue"].median())
 
     def close(a, b):
-        return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-6)
+        return math.isclose(
+            float(a), 
+            float(b), 
+            rel_tol=1e-9, 
+            abs_tol=1e-6)
 
     checks = [
         ("Total revenue", close(my_results["total_revenue"], pandas_total),
          my_results["total_revenue"], pandas_total),
+        
         ("Revenue by product", my_results["product_revenue"] == pandas_products,
          my_results["product_revenue"], pandas_products),
+        
         ("Top 3", my_results["top_three"] == pandas_top,
          my_results["top_three"], pandas_top),
+        
         ("Mean / median", close(my_results["mean"], pandas_mean)
          and close(my_results["median"], pandas_median),
          (my_results["mean"], my_results["median"]), (pandas_mean, pandas_median)),
     ]
+    
     for label, matched, pure, pandas_value in checks:
         if matched:
-            print(f"{label:<20}: MATCH")
+            message = (f"{label:<20}: MATCH")
         else:
-            print(f"{label:<20}: MISMATCH (pure={pure!r}, pandas={pandas_value!r})")
+            message = (f"{label:<20}: MISMATCH (pure={pure!r}, pandas={pandas_value!r})")
 
+
+        messages.append(message)
+        
+    return messages
 
 def money(value):
     return f"{value:,.2f}"
@@ -264,11 +308,24 @@ def build_report(raw_rows, clean_rows, skipped_rows):
 def main():
     raw_rows = read_sales(DATA_PATH)
     clean_rows, skipped_rows = convert_rows(raw_rows)
-    report, results = build_report(raw_rows, clean_rows, skipped_rows)
+    report, results = build_report(
+        raw_rows, 
+        clean_rows, 
+        skipped_rows)
+
+    verification_messages = verify_with_pandas(
+        DATA_PATH,
+        results)
+
+    report += "\n".join(verification_messages) + "\n"
+    
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     OUTPUT_PATH.write_text(report, encoding="utf-8")
+
     print("\n" + report, end="")
-    verify_with_pandas(DATA_PATH, results)
+
+    
 
 
 if __name__ == "__main__":
