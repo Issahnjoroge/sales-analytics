@@ -1,68 +1,160 @@
-# Tech Hub Kenya — September 2026 Sales Analytics
+# Sales Analytics — September 2026
 
-## Overview
+## 1. Project Overview
 
-This project analyses the provided September 2026 electronics sales CSV. The main reporting pipeline (CSV reading, cleaning, aggregation, ranking, filtering, and statistics) uses only Python's standard library. Pandas is imported only inside the optional verification function.
+This project analyses September 2026 electronics sales data using Python.
 
-## How to run
+The program reads sales records from a CSV file, cleans and validates the data, calculates revenue statistics, identifies top-selling products and high value transactions, and generates a sales report.
 
-Requires Python 3.10 or newer.
+The analysis uses Python's standard library. Pandas is used separately to verify the results.
 
-```bash
-python sales_analysis.py
-```
+## 2. Project Objectives
 
-The script prints the report and writes the report body to `output/sales_report.txt`. If pandas is installed, the verification block is printed after the report.
+- Read sales data from a CSV file.
+- Validate and clean quantity and unit price values.
+- Calculate total revenue and revenue by product.
+- Identify the top three products.
+- Identify high value transactions.
+- Analyse revenue by store and payment method.
+- Calculate mean, median, minimum and maximum transaction revenue.
+- Verify analysis results independently using pandas.
 
-To install pandas on a laptop for verification:
+## 3. Data Cleaning and Validation
 
-```bash
-python -m pip install -r requirements.txt
-python sales_analysis.py
-```
+The dataset contained 50 sales records.
 
-The production/reporting environment can run the core analysis without pandas. If pandas is absent, the script clearly says verification was skipped.
+After validation:
+- 46 records were accepted for analysis.
+- 4 records were skipped because of invalid or missing values.
 
-## Cleaning rules and assumptions
+The program applies these validation rules:
 
-The supplied file has 50 rows. Each row is treated as one transaction. Revenue means `quantity × unit_price_kes`; it is not profit, and no cost-of-goods data was supplied.
+- Quantity must be numeric, positive and a whole number.
+- Unit price must be numeric and positive.
+- Currency prefixes, commas and spaces are cleaned before numeric conversion.
+- Invalid or missing values are not guessed or automatically corrected.
+- Skipped records retain their original values and include specific reasons for exclusion.
 
-`parse_number` applies only these conservative repairs:
+### Skipped Records
 
-1. Strip leading/trailing whitespace.
-2. Remove commas used as thousands separators, so `38,999` becomes `38999`.
-3. Remove a leading `KES` currency label, so `KES 18999` becomes `18999`.
-4. Parse the result as a number and reject non-numeric values, infinities, and NaN.
+| Sale ID | Reason |
+|---|---|
+| S-3006 | Quantity is not numeric (`two`) |
+| S-3030 | Unit price is not numeric (`N/A`) |
+| S-3035 | Quantity is blank |
+| S-3039 | Unit price is blank |
 
-No attempt is made to guess words such as `two`, `N/A`, or a missing value. The script does not silently invent quantities or prices.
+## 4. Key Analysis Findings
 
-A row is skipped if quantity is blank/non-numeric, non-positive, or not a whole number; or if unit price is blank/non-numeric or non-positive. If more than one field is invalid, all applicable reasons are recorded. Skipped rows are excluded from every revenue calculation. This is preferable to guessing a transaction amount, which could materially distort financial reporting. A business owner could later check the original till receipt and correct the source data.
+### Overall Revenue
 
-`KES 18999` and `38,999` are accepted because the currency label and thousands comma are unambiguous in this dataset. Negative and zero quantities/prices are rejected as invalid sales assumptions. Decimal quantities are rejected because these electronics are counted as whole units.
+- Total revenue: **KES 1,310,812.00**
+- Valid transactions: **46**
+- Skipped records: **4**
+- High-value transactions: **5**
 
-## Analysis choices
+### Top Three Products
 
-- Product, store, and payment totals use a plain dictionary.
-- Rankings sort by revenue descending. Ties break alphabetically by product/store/method name, making output deterministic.
-- High-value transactions use `revenue >= KES 50,000`, including a transaction exactly on the threshold.
-- The high-value count dictionary includes every store represented in the cleaned data, including stores with zero qualifying transactions.
-- Mean and median are calculated from the cleaned per-transaction revenue values. For an even number of transactions, the median is the average of the two central sorted values.
-- The minimum/maximum function uses a loop rather than `min()` or `max()`.
-- Every custom statistical function raises `ValueError` for an empty list.
+| Product | Revenue (KES) |
+|---|---:|
+| HP 15 Laptop | 389,994.00 |
+| Hisense 43in Smart TV | 272,993.00 |
+| Lenovo Tab M10 | 199,992.00 |
 
-## Pandas verification
+HP 15 Laptop generated the highest revenue among the products analysed.
 
-The verification reads the source CSV independently with pandas, applies the same documented numeric parsing and row-validity rules, recomputes revenue, product totals, top three products, mean, and median, and prints `MATCH` or `MISMATCH`. Top-product ties use the same alphabetical tie-break. If a mismatch appears, compare the cleaning mask and the tie-break rule first; floating-point totals use a small tolerance to avoid harmless representation differences.
+### Revenue by Store
 
-## Project structure
+| Store | Revenue (KES) |
+|---|---:|
+| Kisumu Mega Plaza | 449,678.00 |
+| Nairobi CBD | 331,085.00 |
+| Westgate | 235,979.00 |
+| Mombasa City Mall | 154,082.00 |
+| Nakuru Westside | 139,988.00 |
+
+Kisumu Mega Plaza generated the highest store revenue.
+
+### Revenue by Payment Method
+
+| Payment Method | Revenue (KES) |
+|---|---:|
+| M-Pesa | 738,568.00 |
+| Cash | 304,375.00 |
+| Card | 267,869.00 |
+
+M-Pesa accounted for the highest revenue by payment method.
+
+### Transaction Revenue Statistics
+
+| Statistic | Amount (KES) |
+|---|---:|
+| Mean | 28,495.91 |
+| Median | 11,097.00 |
+| Minimum | 1,499.00 |
+| Maximum | 259,996.00 |
+
+## 5. Pandas Verification
+
+The program independently verifies the standard-library analysis using pandas.
+
+The following checks passed:
+
+| Verification | Result |
+|---|---|
+| Total revenue | MATCH |
+| Revenue by product | MATCH |
+| Top 3 products | MATCH |
+| Mean / median | MATCH |
+
+All four verification checks returned MATCH.
+
+## 6. Project Structure
 
 ```text
 day2-sales-analytics/
-├── sales_analysis.py
+│
 ├── data/
 │   └── electronics_sales.csv
+│
 ├── output/
 │   └── sales_report.txt
-├── requirements.txt
-└── README.md
+│
+├── sales_analysis.py
+├── README.md
+└── requirements.txt
 ```
+
+## 7. Requirements
+
+- Python 3
+- Pandas version 2.0 or later
+
+Install the dependency using:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+## 8. How to Run the Project
+
+Open a terminal in the project directory and run:
+
+```bash
+python3 sales_analysis.py
+```
+
+The program displays the sales report and saves the generated report to:
+
+```text
+output/sales_report.txt
+```
+
+## 9. Conclusion
+
+The analysis processed 46 valid sales records out of 50 supplied records, generating total revenue of KES 1,310,812.00.
+
+HP 15 Laptop was the highest revenue product, Kisumu Mega Plaza was the highest revenue store, and M-Pesa was the leading payment method.
+
+All four pandas verification checks matched the results produced by the standard library analysis.
+
