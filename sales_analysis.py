@@ -20,9 +20,13 @@ def read_sales(path=DATA_PATH):
         return rows
 
     except FileNotFoundError:
-        raise FileNotFoundError(f"Sales. CSV file was not found: {path}")
+        raise FileNotFoundError(f"Sales CSV file was not found: {path}")
 
-    except PermissionError
+    except PermissionError:
+        raise PermissionError(f"Permission denied when reading the CSV: {path}")
+
+    except OSError as error:
+        raise OSError(f"Could not read sales CSV file: {error}")
 
 
 def parse_number(value):
@@ -66,7 +70,7 @@ def convert_rows(rows):
             if raw_quantity is None or str(raw_quantity).strip() == "":
                 reasons.append(f"quantity is blank (raw value: {raw_quantity!r})")
             else:
-                reasons.append(f"quantity is not numeric(raw value: {raw_quantity!r})")
+                reasons.append(f"quantity is not numeric (raw value: {raw_quantity!r})")
         
         elif quantity <= 0:
             reasons.append(f"quantity must be positive (raw_value: {raw_quantity!r})")
@@ -169,8 +173,45 @@ def verify_with_pandas(path, my_results):
 
     frame = pd.read_csv(path, dtype=str, keep_default_na=False)
     
-    frame["quantity_num"] = frame["quantity"].map(parse_number)
-    frame["price_num"] = frame["unit_price_kes"].map(parse_number)
+  
+    quantity_text = (
+        frame["quantity"]
+        .astype(str)
+        .str.strip()
+        .str.replace(r"(?i)^KES", "", regex=True)
+        .str.replace(",", "", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
+
+    frame["quantity_num"] = pd.to_numeric(
+        quantity_text,
+        errors="coerce"
+    )
+
+
+    price_text = (
+        frame["unit_price_kes"]
+        .astype(str)
+        .str.strip()
+        .str.replace(r"(?i)^KES", "", regex=True)
+        .str.replace(",", "", regex=False)
+        .str.replace(" ", "", regex=False)
+    )
+
+    frame["price_num"] = pd.to_numeric(
+        price_text,
+        errors="coerce"
+    )
+
+    frame["quantity_num"] = frame["quantity_num"].replace(
+        [float("inf"), float("-inf")],
+        float("nan")
+    )
+
+    frame["price_num"] = frame["price_num"].replace(
+        [float("inf"), float("-inf")],
+        float("nan")
+    )
     
     valid_quantity = (
         frame["quantity_num"].notna()
@@ -201,11 +242,20 @@ def verify_with_pandas(path, my_results):
             rel_tol=1e-9, 
             abs_tol=1e-6)
 
+    def dictionaries_close(first, second):
+        if first.keys() != second.keys():
+            return False
+
+        return all(
+            close(first[key], second[key])
+            for key in first
+        )
+
     checks = [
         ("Total revenue", close(my_results["total_revenue"], pandas_total),
          my_results["total_revenue"], pandas_total),
         
-        ("Revenue by product", my_results["product_revenue"] == pandas_products,
+        ("Revenue by product",dictionaries_close(my_results["product_revenue"], pandas_products), 
          my_results["product_revenue"], pandas_products),
         
         ("Top 3", my_results["top_three"] == pandas_top,
@@ -231,27 +281,56 @@ def money(value):
     return f"{value:,.2f}"
 
 
-def build_report(raw_rows, clean_rows, skipped_rows):
+def calculate_results(clean_rows):
+    """Calculate all sales analysis results."""
     total = total_revenue(clean_rows)
     products = revenue_by(clean_rows, "product")
     stores = revenue_by(clean_rows, "store")
     payments = revenue_by(clean_rows, "payment_method")
     top_three = top_n(products, 3)
     qualifying = high_value(clean_rows, HIGH_VALUE_THRESHOLD)
+
     revenues = [row["revenue"] for row in clean_rows]
     low, high = minimum_maximum(revenues)
+
     store_names = sorted({row["store"] for row in clean_rows})
+
     high_value_counts = {
-        store: sum(1 for row in qualifying if row["store"] == store)
+        store: sum(
+            1 for row in qualifying
+            if row["store"] == store
+        )
         for store in store_names
     }
-    results = {
+
+    return {
         "total_revenue": total,
         "product_revenue": products,
+        "stores": stores,
+        "payments": payments,
         "top_three": top_three,
+        "qualifying": qualifying,
+        "high_value_counts": high_value_counts,
         "mean": mean(revenues),
         "median": median(revenues),
+        "minimum": low,
+        "maximum": high,
     }
+
+
+def build_report(raw_rows, clean_rows, skipped_rows):
+ 
+    results = calculate_results(clean_rows)
+
+    total = results["total_revenue"]
+    products = results["product_revenue"]
+    stores = results["stores"]
+    payments = results["payments"]
+    top_three = results["top_three"]
+    qualifying = results["qualifying"]
+    high_value_counts = results["high_value_counts"]
+    low = results["minimum"]
+    high = results["maximum"]
 
     lines = [
         "=== Sales report: September 2026 ===",
@@ -259,39 +338,64 @@ def build_report(raw_rows, clean_rows, skipped_rows):
         f"Rows used          : {len(clean_rows)}",
         f"Rows skipped       : {len(skipped_rows)}",
     ]
+
     if skipped_rows:
         lines.append("Skipped rows:")
-        lines.extend(f"  {row.get('sale_id', '(unknown ID)')}: {row['reason']}"
-                     for row in skipped_rows)
+        lines.extend(
+            f"  {row.get('sale_id', '(unknown ID)')}: {row['reason']}"
+            for row in skipped_rows
+        )
+
     lines += [
         "",
         f"Total revenue (KES): {money(total)}",
         "",
         "Revenue by product (KES)",
     ]
-    for product, amount in sorted(products.items(), key=lambda item: (-item[1], item[0])):
+
+    for product, amount in sorted(
+        products.items(),
+        key=lambda item: (-item[1], item[0])
+    ):
         lines.append(f"  {product:<28} {money(amount):>14}")
+
     lines += ["", "Top 3 products"]
+
     for index, (product, amount) in enumerate(top_three, 1):
         lines.append(f"  {index}. {product} - KES {money(amount)}")
+
     lines += [
         "",
         f"High-value transactions (>= KES {money(HIGH_VALUE_THRESHOLD)}): {len(qualifying)}",
     ]
+
     for row in qualifying:
         lines.append(
             f"  {row['sale_id']}  {row['sale_date']}  {row['store']}  "
             f"{row['product']}  KES {money(row['revenue'])}"
         )
+
     lines += ["", "High-value transaction count by store"]
+
     for store, count in high_value_counts.items():
         lines.append(f"  {store:<24} {count}")
+
     lines += ["", "Revenue by store (KES)"]
-    for store, amount in sorted(stores.items(), key=lambda item: (-item[1], item[0])):
+
+    for store, amount in sorted(
+        stores.items(),
+        key=lambda item: (-item[1], item[0])
+    ):
         lines.append(f"  {store:<24} {money(amount):>14}")
+
     lines += ["", "Revenue by payment method (KES)"]
-    for method, amount in sorted(payments.items(), key=lambda item: (-item[1], item[0])):
+
+    for method, amount in sorted(
+        payments.items(),
+        key=lambda item: (-item[1], item[0])
+    ):
         lines.append(f"  {method:<24} {money(amount):>14}")
+
     lines += [
         "",
         "Transaction revenue statistics",
@@ -302,6 +406,7 @@ def build_report(raw_rows, clean_rows, skipped_rows):
         "",
         "=== pandas verification ===",
     ]
+
     return "\n".join(lines) + "\n", results
 
 
@@ -330,3 +435,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+    
+
+
+
